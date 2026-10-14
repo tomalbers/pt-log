@@ -43,7 +43,7 @@ canvas{width:100%;height:220px;display:block;touch-action:pan-y}.cwrap{position:
 .foot{position:fixed;left:0;right:0;bottom:0;background:#fff;padding:8px 12px calc(8px + env(safe-area-inset-bottom));box-shadow:0 -2px 8px rgba(0,0,0,.1)}
 .foot .btn{margin:0;max-width:676px;margin:0 auto}
 </style></head><body>
-<header><button id="back" aria-label="Terug" style="display:none">‹</button><h1 id="title">PT Log</h1><button id="menu" aria-label="Instellingen">⚙︎</button></header>
+<header><button id="back" aria-label="Terug" style="display:none">‹</button><h1 id="title">PT Log</h1><button id="sync" aria-label="Synchronisatie" style="display:none;font-size:15px"></button><button id="menu" aria-label="Instellingen">⚙︎</button></header>
 <main id="app"></main>
 <script>
 'use strict';
@@ -91,30 +91,34 @@ let stack=[];
 function go(v,p,replace){if(!replace&&cur)stack.push(cur);cur={v,p};render();window.scrollTo(0,0)}
 let cur=null;
 $('#back').onclick=()=>{if(cur&&cur.v==='session'&&!confirm('Training verlaten? Je invoer blijft bewaard als concept.'))return;cur=stack.pop()||{v:'home'};render()};
-$('#menu').onclick=()=>go('settings');
+$('#menu').onclick=()=>go(window.PTS&&PTS.ro?'cloud':'settings');$('#sync').onclick=()=>go('cloud');
 function head(t,back){$('#title').textContent=t;$('#back').style.display=back?'':'none'}
-function render(){const a=$('#app');const V={home,client,editClient,schema,session,exStats,settings,history:histView,progress,clientAdmin,admin,planning}[cur.v];a.innerHTML='';V(a,cur.p||{})}
+function render(){const a=$('#app');const V={home,client,editClient,schema,session,exStats,settings,history:histView,progress,clientAdmin,admin,planning,cloud:(a,p)=>cloud(a,p),cview:(a,p)=>cview(a,p)}[cur.v];a.innerHTML='';V(a,cur.p||{})}
 
-function home(a){head('PT Log',false);stack=[];
+function home(a){if(window.PTS&&PTS.ro){cur={v:'cview'};return render()}head('PT Log',false);stack=[];
  let h='';
+ if(!(window.PTS&&PTS.user))h+=`<div class="card"><h2>Online account</h2><div class="sub">Log in als trainer om te synchroniseren, of als klant om je schema te bekijken.</div><button class="btn sec" id="login">Inloggen</button></div>`;
  if(D.draft){const c=D.clients.find(x=>x.id===D.draft.clientId);if(c)h+=`<div class="card"><h2>Training bezig</h2><div class="sub">${esc(c.name)} · Training ${D.draft.training} · ${fmtD(D.draft.date)}</div><button class="btn grn" id="resume">Verder met training</button></div>`}
  h+=`<div class="card"><h2>Klanten</h2><div class="list">${D.clients.length?D.clients.slice().sort((x,y)=>x.name.localeCompare(y.name)).map(c=>{const ss=clientSessions(c.id);const l=ss[ss.length-1];return `<button class="item" data-c="${c.id}"><span>${esc(c.name)}<br><span class="sub">Schema ${c.plan} · ${l?'laatst '+fmtD(l.date)+' ('+l.training+')':'nog geen trainingen'}</span></span><span>›</span></button>`}).join(''):'<p class="sub">Nog geen klanten. Voeg je eerste klant toe.</p>'}</div>
  <button class="btn" id="add">+ Nieuwe klant</button><button class="btn sec" id="adm">📋 Administratie</button></div>`;
  a.innerHTML=h;
  a.querySelectorAll('[data-c]').forEach(b=>b.onclick=()=>go('client',{id:b.dataset.c}));
  $('#add').onclick=()=>go('editClient',{});$('#adm').onclick=()=>go('admin',{});
- const r=$('#resume');if(r)r.onclick=()=>go('session',{});
+ const r=$('#resume');if(r)r.onclick=()=>go('session',{});const lg=$('#login');if(lg)lg.onclick=()=>go('cloud');
 }
 function editClient(a,p){const c=p.id?D.clients.find(x=>x.id===p.id):null;head(c?'Klant bewerken':'Nieuwe klant',true);
  a.innerHTML=`<div class="card"><label>Naam</label><input id="nm" value="${esc(c?.name)}" autocomplete="off">
  <label>Startdatum (voor weeknummer)</label><input id="st" type="date" value="${c?.start||today()}">
  <label>Schema</label><div class="tabs" id="pl"><button data-p="2x">2x per week (A/B)</button><button data-p="3x">3x per week (A/B/C)</button></div>
  <label>Notities (doel, blessures…)</label><textarea id="no">${esc(c?.notes)}</textarea>
+ <label>E-mail klant (voor klantportaal)</label><input id="em" type="email" value="${esc(c?.email)}" autocomplete="off">
+ <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="shp" style="width:auto" ${c?.share?.plan?'checked':''}> Schema en planning delen met klant</label>
+ <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="shs" style="width:auto" ${c?.share?.sessions?'checked':''}> Trainingen en voortgang delen met klant</label>
  <button class="btn" id="sv">Opslaan</button>${c?'<button class="btn red" id="del">Klant verwijderen</button>':''}</div>`;
  let plan=c?.plan||'2x';const setP=()=>a.querySelectorAll('#pl button').forEach(b=>b.classList.toggle('on',b.dataset.p===plan));setP();
  a.querySelectorAll('#pl button').forEach(b=>b.onclick=()=>{plan=b.dataset.p;setP()});
  $('#sv').onclick=()=>{const name=$('#nm').value.trim();if(!name){toast('Vul een naam in');return}
-  if(c){Object.assign(c,{name,start:$('#st').value||today(),plan,notes:$('#no').value})}else{D.clients.push({id:uid(),name,start:$('#st').value||today(),plan,notes:$('#no').value,schema:defSchema()})}
+  const ext={email:$('#em').value.trim().toLowerCase(),share:{plan:$('#shp').checked,sessions:$('#shs').checked}};if(c){Object.assign(c,{name,start:$('#st').value||today(),plan,notes:$('#no').value},ext)}else{D.clients.push({id:uid(),name,start:$('#st').value||today(),plan,notes:$('#no').value,schema:defSchema(),...ext})}
   save();toast('Opgeslagen');cur=stack.pop();if(!c)cur={v:'client',p:{id:D.clients[D.clients.length-1].id}};render()};
  const d=$('#del');if(d)d.onclick=()=>{if(!confirm(`${c.name} en alle trainingen verwijderen?`))return;D.clients=D.clients.filter(x=>x!==c);D.sessions=D.sessions.filter(s=>s.clientId!==c.id);if(D.draft&&D.draft.clientId===c.id)D.draft=null;save();stack=[];cur={v:'home'};render()};
 }
@@ -126,11 +130,14 @@ function client(a,p){const c=D.clients.find(x=>x.id===p.id);if(!c){cur={v:'home'
  ${adminCard(c)}<div class="card"><div class="row"><button class="btn" id="prog">📈 Voortgang</button><button class="btn" id="plan">🗓 Planning</button></div></div>
  <div class="card"><h2>Voortgang per oefening</h2><div class="list">${exNames(c).map(n=>`<button class="item" data-e="${esc(n)}"><span>${esc(n)}</span><span class="sub">${statLine(c.id,n)} ›</span></button>`).join('')}</div></div>
  <div class="card"><h2>Geschiedenis</h2>${ss.length?'<div class="list">'+ss.slice().reverse().map(s=>`<button class="item" data-s="${s.id}"><span>${fmtD(s.date)} · Training ${s.training}<br><span class="sub">Week ${s.week} · spierpijn ${s.sp??'-'} · energie ${s.en??'-'}</span></span><span>›</span></button>`).join('')+'</div>':'<p class="sub">Nog geen trainingen gelogd.</p>'}</div>
- <div class="card"><button class="btn sec" id="sch">Schema aanpassen</button><button class="btn sec" id="ed">Klantgegevens</button>${c.notes?`<p class="sub">${esc(c.notes)}</p>`:''}</div>`;
+ <div class="card"><button class="btn sec" id="sch">Schema aanpassen</button><button class="btn sec" id="ed">Klantgegevens</button><button class="btn sec" id="inv">✉️ Uitnodigen voor klantportaal</button>${c.notes?`<p class="sub">${esc(c.notes)}</p>`:''}</div>`;
  a.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>startSession(c,b.dataset.t));
  a.querySelectorAll('[data-e]').forEach(b=>b.onclick=()=>go('exStats',{id:c.id,n:b.dataset.e}));
  a.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>go('history',{id:b.dataset.s}));
  bindAdminCard(c);$('#plan').onclick=()=>go('planning',{id:c.id});$('#prog').onclick=()=>go('progress',{id:c.id});$('#sch').onclick=()=>go('schema',{id:c.id,t:'A'});$('#ed').onclick=()=>go('editClient',{id:c.id});
+ $('#inv').onclick=async()=>{if(!(window.PTS&&PTS.role==='trainer')){toast('Log eerst in als trainer');return go('cloud')}if(!c.email){toast('Vul eerst het e-mailadres van de klant in');return go('editClient',{id:c.id})}
+  if(!c.share||(!c.share.plan&&!c.share.sessions))if(!confirm('Je deelt nog niets met deze klant. Toch uitnodigen?'))return;
+  try{await PTS.syncNow();await PTS.invite(c.email);toast('Uitnodiging verstuurd naar '+c.email)}catch(e){alert('Uitnodigen mislukt: '+e.message)}};
 }
 function exNames(c){const s=new Set();trainings(c).forEach(t=>c.schema[t].forEach(e=>s.add(e.n)));clientSessions(c.id).forEach(x=>x.ex.forEach(e=>s.add(e.n)));return[...s]}
 function statLine(cid,n){const l=lastEx(cid,n);if(!l)return'';const mx=Math.max(...l.e.sets.map(s=>s.kg||0));return mx?mx+'kg':''}
@@ -195,8 +202,8 @@ function schema(a,p){const c=D.clients.find(x=>x.id===p.id);head('Schema '+c.nam
 function histView(a,p){const s=D.sessions.find(x=>x.id===p.id);const c=D.clients.find(x=>x.id===s.clientId);head(fmtD(s.date)+' · '+s.training,true);
  a.innerHTML=`<div class="card"><div class="sub">${esc(c.name)} · Week ${s.week} · spierpijn ${s.sp??'-'} · energie ${s.en??'-'}</div>${s.note?`<p>${esc(s.note)}</p>`:''}
  <table><tr><th>Oefening</th><th>Sets</th><th>Vol.</th></tr>${s.ex.map(e=>`<tr><td>${esc(e.n)}${e.note?`<br><span class="sub">${esc(e.note)}</span>`:''}</td><td>${esc(prevText(e))}</td><td>${vol(e)}</td></tr>`).join('')}</table>
- ${s.rt?Object.keys(RTN).map(k=>`<p class="sub">${RTN[k].split(' (')[0]}: ${s.rt[k].filter(x=>x.done).length}/${s.rt[k].length} afgevinkt</p>`).join(''):''}<button class="btn red" id="del">Training verwijderen</button></div>`;
- $('#del').onclick=()=>{if(confirm('Deze training verwijderen?')){D.sessions=D.sessions.filter(x=>x!==s);save();cur=stack.pop();render()}};
+ ${s.rt?Object.keys(RTN).map(k=>`<p class="sub">${RTN[k].split(' (')[0]}: ${s.rt[k].filter(x=>x.done).length}/${s.rt[k].length} afgevinkt</p>`).join(''):''}${D.ro?'':'<button class="btn red" id="del">Training verwijderen</button>'}</div>`;
+ if($('#del'))$('#del').onclick=()=>{if(confirm('Deze training verwijderen?')){D.sessions=D.sessions.filter(x=>x!==s);save();cur=stack.pop();render()}};
 }
 function isoWeek(ds){const d=new Date(ds+'T12:00');d.setDate(d.getDate()+3-(d.getDay()+6)%7);const w1=new Date(d.getFullYear(),0,4);return d.getFullYear()+'-W'+String(1+Math.round(((d-w1)/864e5-3+(w1.getDay()+6)%7)/7)).padStart(2,'0')}
 function exStats(a,p){const c=D.clients.find(x=>x.id===p.id);const n=p.n;head(n,true);
@@ -348,11 +355,12 @@ function planning(a,p){const c=D.clients.find(x=>x.id===p.id);head('Planning '+c
  const sa=$('#swall');if(sa)sa.onclick=()=>{Object.keys(VAR).forEach(n=>b.swaps[n]=VAR[n]);save();render()};
 }
 function settings(a){head('Back-up & instellingen',true);
- a.innerHTML=`<div class="card"><h2>Back-up</h2><p class="sub">Je gegevens staan alleen op dit apparaat (in de browser). Maak regelmatig een back-up en bewaar die bijvoorbeeld in Google Drive.</p>
+ a.innerHTML=`<div class="card"><h2>Online account</h2><p class="sub">${window.PTS&&PTS.user?'Ingelogd als '+esc(PTS.user.email):'Niet ingelogd'}</p><button class="btn" id="cl">Account & synchronisatie</button></div>`+`<div class="card"><h2>Back-up</h2><p class="sub">Je gegevens staan alleen op dit apparaat (in de browser). Maak regelmatig een back-up en bewaar die bijvoorbeeld in Google Drive.</p>
  <button class="btn" id="ex">Back-up exporteren (JSON)</button><button class="btn sec" id="im">Back-up importeren</button><input type="file" id="fi" accept=".json,application/json" style="display:none">
  <button class="btn sec" id="csv">Exporteren als CSV (Excel/Sheets)</button></div>
  <div class="card"><p class="sub">${D.clients.length} klanten · ${D.sessions.length} trainingen</p><button class="btn red" id="wipe">Alle gegevens wissen</button></div>`;
  const dl=(name,txt,type)=>{const b=new Blob([txt],{type});const u=URL.createObjectURL(b);const l=document.createElement('a');l.href=u;l.download=name;document.body.appendChild(l);l.click();l.remove();setTimeout(()=>URL.revokeObjectURL(u),1000)};
+ $('#cl').onclick=()=>go('cloud');
  $('#ex').onclick=()=>dl('ptlog-backup-'+today()+'.json',JSON.stringify(D,null,1),'application/json');
  $('#im').onclick=()=>$('#fi').click();
  $('#fi').onchange=e=>{const f=e.target.files[0];if(!f)return;f.text().then(t=>{const d=JSON.parse(t);if(!d.clients||!d.sessions)throw 0;if(confirm('Huidige gegevens vervangen door deze back-up?')){D=d;save();toast('Back-up geïmporteerd')}}).catch(()=>alert('Ongeldig back-upbestand'))};
@@ -364,4 +372,38 @@ function settings(a){head('Back-up & instellingen',true);
 window.addEventListener('popstate',()=>{});
 cur={v:'home'};render();
 if('serviceWorker' in navigator&&location.protocol!=='file:')navigator.serviceWorker.register('sw.js');
-</script></body></html>
+</script>
+<script>
+function cloud(a){const P=window.PTS;head('Account',true);
+ if(!P){a.innerHTML='<div class="card"><p class="sub">Online functies laden… (internet nodig)</p></div>';return}
+ const u=P.user;
+ if(u){a.innerHTML=`<div class="card"><h2>${P.role==='trainer'?'Trainer':'Klant'}</h2><p class="sub">Ingelogd als ${esc(u.email)}</p>
+ ${P.role==='trainer'?`<p class="sub">Sync: ${esc(P.status)} · ${P.pending()} wijziging(en) in wachtrij</p><button class="btn" id="sn">Nu synchroniseren</button>`:''}
+ <label>Nieuw wachtwoord instellen</label><input id="np" type="password" autocomplete="new-password"><button class="btn sec" id="spw">Wachtwoord opslaan</button>
+ <button class="btn red" id="so">Uitloggen</button></div>
+ ${P.role!=='trainer'?`<details class="card"><summary>Ben je de trainer?</summary><label>Trainerscode</label><input id="tc" autocomplete="off"><button class="btn sec" id="tcb">Trainer worden</button></details>`:''}`;
+  const sn=$('#sn');if(sn)sn.onclick=async()=>{await P.syncNow();toast('Sync: '+P.status);render()};
+  $('#spw').onclick=async()=>{const v=$('#np').value;if(v.length<8){toast('Minimaal 8 tekens');return}try{await P.setPassword(v);toast('Wachtwoord opgeslagen')}catch(e){alert(e.message)}};
+  $('#so').onclick=()=>P.signOut();
+  const tcb=$('#tcb');if(tcb)tcb.onclick=async()=>{try{if(await P.claim($('#tc').value.trim())){toast('Je bent nu trainer');cur={v:'home'};render()}else alert('Code onjuist')}catch(e){alert(e.message)}};return}
+ a.innerHTML=`<div class="card"><h2>Inloggen</h2><label>E-mail</label><input id="le" type="email" autocomplete="username"><label>Wachtwoord</label><input id="lp" type="password" autocomplete="current-password">
+ <button class="btn" id="li">Inloggen</button><button class="btn sec" id="su">Nieuw account aanmaken</button><button class="btn sec" id="rs">Wachtwoord vergeten</button>
+ <p class="sub">Klant? Gebruik de link uit de uitnodigingsmail van je trainer. Je gegevens op dit apparaat blijven gewoon bewaard.</p></div>`;
+ const ev=()=>$('#le').value.trim();
+ $('#li').onclick=async()=>{try{await P.signIn(ev(),$('#lp').value);toast('Ingelogd');if(!P.ro){cur={v:'home'};stack=[];render()}}catch(e){alert('Inloggen mislukt: '+e.message)}};
+ $('#su').onclick=async()=>{if($('#lp').value.length<8){toast('Wachtwoord minimaal 8 tekens');return}try{await P.signUp(ev(),$('#lp').value);alert('Check je e-mail om je account te bevestigen, en log daarna in.')}catch(e){alert(e.message)}};
+ $('#rs').onclick=async()=>{if(!ev()){toast('Vul je e-mail in');return}try{await P.reset(ev());alert('Je krijgt een e-mail met een link om je wachtwoord in te stellen.')}catch(e){alert(e.message)}};
+}
+function cview(a){head('Mijn training',false);stack=[];const c=D.clients[0];
+ if(!c){a.innerHTML=`<div class="card"><h2>Welkom</h2><p class="sub">Je trainer heeft nog niets met je gedeeld. Kom later terug.</p><button class="btn sec" id="acc">Account</button></div>`;$('#acc').onclick=()=>go('cloud');return}
+ const ss=clientSessions(c.id);const t=today();const b=curBlock(c);const cw=b&&bWeek(b,t);let h=`<div class="card"><h2>Hoi ${esc(c.name)}</h2><div class="sub">Alleen-lezen: je trainer logt de trainingen.</div></div>`;
+ if(c.shared.plan){if(b){const w=cw?b.weeks[cw-1]:null;const nw=cw&&b.weeks[cw]?b.weeks[cw]:null;
+  h+=`<div class="card"><h2>Deze week</h2>${w?`<p><b>Week ${cw}/${b.weeks.length} · ${esc(w.ph)}</b><br>${esc(w.sets)}×${esc(w.reps)} · RIR ${esc(w.rir)}${w.hiit?' · HIIT '+esc(w.hiit):''}</p>`:'<p class="sub">Geen actief blok deze week.</p>'}${nw?`<p class="sub">Volgende week: ${esc(nw.ph)} · ${esc(nw.sets)}×${esc(nw.reps)} · RIR ${esc(nw.rir)}</p>`:''}</div>
+  <div class="card"><h2>Planning</h2><div class="sub">${fmtD(b.start)} – ${fmtD(bEnd(b))}</div><table class="plan"><tr><th>Wk</th><th>Fase</th><th>Sets×reps</th><th>RIR</th><th>HIIT</th></tr>${b.weeks.map((w,i)=>`<tr class="${cw===i+1?'now':''}${w.dl?' dl':''}"><td><b>${i+1}</b><br><span class="sub">${dm(addD(b.start,i*7))}</span></td><td>${esc(w.ph)}</td><td>${esc(w.sets)}×${esc(w.reps)}</td><td>${esc(w.rir)}</td><td class="sub">${esc(w.hiit)}</td></tr>`).join('')}</table></div>`}
+  h+=`<div class="card"><h2>Mijn schema</h2>${trainings(c).map(T=>`<h3>Training ${T}</h3>${(c.schema[T]||[]).map(e=>`<div class="sub">${esc(swapName(b,cw||0,e.n))} · ${esc(e.r)}</div>`).join('')}`).join('')}</div>`}
+ if(c.shared.sessions){h+=`<div class="card"><button class="btn" id="prog">📈 Mijn voortgang</button></div><div class="card"><h2>Mijn trainingen (${ss.length})</h2>${ss.length?'<div class="list">'+ss.slice().reverse().map(s=>`<button class="item" data-s="${s.id}"><span>${fmtD(s.date)} · Training ${esc(s.training)}<br><span class="sub">Week ${s.week}</span></span><span>›</span></button>`).join('')+'</div>':'<p class="sub">Nog geen trainingen.</p>'}</div>`}
+ h+=`<div class="card"><button class="btn sec" id="acc">Account</button></div>`;a.innerHTML=h;
+ const pg=$('#prog');if(pg)pg.onclick=()=>go('progress',{id:c.id});a.querySelectorAll('[data-s]').forEach(x=>x.onclick=()=>go('history',{id:x.dataset.s}));$('#acc').onclick=()=>go('cloud');
+}
+</script>
+<script type="module" src="sync.js"></script></body></html>
